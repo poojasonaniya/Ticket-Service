@@ -33,6 +33,17 @@ curl http://localhost:3000/tickets/t-1005
 curl "http://localhost:3000/tickets?category=billing&priority=high"
 ```
 
+### Looking at the database
+
+It's just a SQLite file at `prisma/dev.db`. Easiest way to browse it is Prisma
+Studio, run this and it opens a page in your browser where you can see and
+edit every row:
+
+```bash
+npx prisma studio
+```
+
+
 ## Tests
 
 ```bash
