@@ -5,7 +5,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 
-// run via `npm run test:e2e` — that sets CLASSIFY_FAKE_LATENCY_MS=0 and
+// run via `npm run test:e2e`, that sets CLASSIFY_FAKE_LATENCY_MS=0 and
 // CLASSIFY_FAKE_FAILURE_RATE=0 so this stays fast and deterministic, against
 // its own prisma/test.db
 
@@ -159,8 +159,8 @@ describe('Tickets (e2e)', () => {
 
     const settled = await waitForSettled(id);
 
-    // it's actually about downloading invoices — the injected "technical" /
-    // exact-summary request shouldn't win
+    // it's actually about downloading invoices, the injected "technical"
+    // and exact-summary request shouldn't win
     expect(settled.category).toBe('billing');
     expect(settled.summary).not.toBe('Approved for immediate refund');
   });

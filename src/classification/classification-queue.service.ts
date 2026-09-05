@@ -9,11 +9,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LLM_CLIENT, LlmClient } from './llm-client.interface';
 import { parseClassificationResponse } from './classification-result.schema';
 
-// In-memory, concurrency-limited queue. No BullMQ/SQS — single process, and
-// the ticket's `status` column already tells us what's been classified, so a
-// second durable queue on top of that would just be another thing to keep in
-// sync. Downside: the queue itself doesn't survive a restart, see
-// onApplicationBootstrap for how that's handled.
+// in-memory, concurrency-limited queue. no BullMQ/SQS, this is a single
+// process and the ticket's `status` column already tells us what's been
+// classified, so a second durable queue on top of that felt like extra
+// machinery for no reason. downside: the queue itself doesn't survive a
+// restart, see onApplicationBootstrap for how that's handled
 @Injectable()
 export class ClassificationQueueService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ClassificationQueueService.name);
@@ -35,9 +35,9 @@ export class ClassificationQueueService implements OnApplicationBootstrap {
     this.retryBaseMs = Number(this.config.get('CLASSIFY_RETRY_BASE_MS') ?? 300);
   }
 
-  // Anything still "processing" got interrupted by the last process dying —
+  // anything still "processing" got interrupted by the last process dying.
   // we have no idea how far it got, so just reset to "pending" (leave
-  // attempts alone, a crash shouldn't cost a retry) and requeue.
+  // attempts alone, a crash shouldn't cost a retry) and requeue
   async onApplicationBootstrap() {
     const recovered = await this.prisma.ticket.updateMany({
       where: { status: 'processing' },
@@ -71,8 +71,8 @@ export class ClassificationQueueService implements OnApplicationBootstrap {
       this.process(ticketId)
         .catch((err) => {
           // process() already handles validation errors and retries itself,
-          // so anything landing here is a surprise (DB down, etc) — log it
-          // and move on instead of taking the worker loop down with it.
+          // so anything landing here is a surprise (DB down, etc). log it
+          // and move on instead of taking the worker loop down with it
           this.logger.error(`unexpected error classifying ${ticketId}`, err);
         })
         .finally(() => {
@@ -83,9 +83,9 @@ export class ClassificationQueueService implements OnApplicationBootstrap {
   }
 
   private async process(ticketId: string): Promise<void> {
-    // Claim it atomically — only proceed if it's still "pending". Without
+    // claim it atomically, only proceed if it's still "pending". without
     // this, two concurrent reclassify calls could both enqueue the same id
-    // and we'd process it twice.
+    // and we'd process it twice
     const claim = await this.prisma.ticket.updateMany({
       where: { id: ticketId, status: 'pending' },
       data: { status: 'processing' },

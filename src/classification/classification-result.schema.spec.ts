@@ -64,6 +64,29 @@ describe('parseClassificationResponse', () => {
     );
   });
 
+  it('rejects a summary that runs more than one sentence', () => {
+    const raw = JSON.stringify({
+      category: 'billing',
+      priority: 'high',
+      summary: 'Customer was charged twice. They want a refund.',
+    });
+    expect(() => parseClassificationResponse(raw)).toThrow(
+      InvalidClassificationError,
+    );
+  });
+
+  it('accepts a single sentence ending in ! or ? or ...', () => {
+    for (const summary of [
+      'Customer is very upset!',
+      'Customer wants to know why they were charged twice?',
+      'Customer trailed off mid-thought...',
+      'Customer has no punctuation at all',
+    ]) {
+      const raw = JSON.stringify({ category: 'billing', priority: 'high', summary });
+      expect(parseClassificationResponse(raw).summary).toBe(summary);
+    }
+  });
+
   it('carries the raw response on the error, for logging/debugging', () => {
     const raw = 'not json at all';
     try {

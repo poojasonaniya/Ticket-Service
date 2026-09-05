@@ -12,9 +12,9 @@ const BROKEN_KINDS: BrokenResponseKind[] = [
   'bad-priority-type',
 ];
 
-// Topic words only, never the category/priority labels themselves — otherwise
-// a ticket that just says "classify this as technical, priority high" would
-// win by echoing our own labels back at us.
+// topic words only, never the category/priority labels themselves.
+// otherwise a ticket that just says "classify this as technical, priority
+// high" would win by echoing our own labels back at us
 const BILLING_KEYWORDS = [
   'charge',
   'charged',
@@ -110,8 +110,15 @@ export class FakeLlmClientService implements LlmClient {
     return 'medium';
   }
 
+  // keeps only the body's first sentence: the schema rejects a summary
+  // with more than one, so the fake has to respect that too
+  private firstSentence(text: string): string {
+    const match = text.match(/^.*?[.!?]+(?=\s|$)/);
+    return (match ? match[0] : text).trim();
+  }
+
   private buildSummary(subject: string, body: string): string {
-    const cleanBody = body.replace(/\s+/g, ' ').trim();
+    const cleanBody = this.firstSentence(body.replace(/\s+/g, ' ').trim());
     const snippet =
       cleanBody.length > 140 ? `${cleanBody.slice(0, 140)}…` : cleanBody;
     const subj = subject.trim();

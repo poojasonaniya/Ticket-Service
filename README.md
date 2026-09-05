@@ -1,191 +1,184 @@
 # Ticket Service
 
-It's a service that takes in support tickets, runs them
-through an LLM to classify them (fake LLM), and lets you
-read the results back through a REST API.
+A small NestJS service for taking in support tickets, classifying them in the
+background, and reading the results back over HTTP.
 
-## Running it
+The classifier is fake on purpose. I used a fake client that returns normal JSON most of the time and broken
+responses sometimes. The more important part here is that the application
+treats the classifier response as untrusted text.
+
+## Running It
 
 You need Node 20+.
 
-Please run below commands to get started.
-
-```
+```bash
 npm install
+cp .env.example .env
 npx prisma migrate deploy
 npm run start:dev
 ```
 
-The server runs on port 3000.
+The server runs on port `3000`.
 
-If you want the sample tickets from the appendix loaded in, run this in a
-second terminal once the server's up:
+To load the sample tickets from the appendix, keep the server running and run below command:
 
-```
+```bash
 npm run seed
 ```
 
-then try
+A couple of example requests:
 
-```
+```bash
 curl http://localhost:3000/tickets/t-1005
 curl "http://localhost:3000/tickets?category=billing&priority=high"
 ```
 
-### Looking at the database
+## Tests
 
-It's just a SQLite file at prisma/dev.db. Easiest way to browse it is Prisma
-Studio, run this and it opens a page in your browser where you can see and
-edit every row:
-
-```
-npx prisma studio
-```
-
-or if you'd rather stay in the terminal:
-
-```
-sqlite3 prisma/dev.db ".mode column" ".headers on" "SELECT id, status, category, priority FROM Ticket;"
-```
-
-### Tests
-
-```
+```bash
 npm test
 npm run test:e2e
 ```
 
-e2e uses its own db file (prisma/test.db) and forces the fake classifier's
-failure rate to 0 and latency to 0, otherwise the suite would be flaky
-because of the random broken responses. Normal dev mode keeps the defaults.
+The e2e test uses a separate SQLite database and sets the fake classifier's
+latency and failure rate to zero, so the test is not flaky.
 
 ## API
 
-- `POST /tickets`: body is `{ id, subject, body }`. You get `201` if it's a
-  new ticket, `200` if that id already existed (returns the existing ticket
-  untouched, doesn't reclassify, doesn't duplicate anything).
-- `GET /tickets/:id`: 404 if it's not there.
-- `GET /tickets`: takes `category`, `priority`, `page`, `pageSize` as query
-  params, all optional. Default page is 1, pageSize 20.
-  Response shape is `{ data, page, pageSize, total }`.
-- `POST /tickets/:id/reclassify`: kicks off classification again for a
-  ticket that's `classified` or `failed`. 404 if missing, 409 if it's
-  currently `pending` or `processing` (already going, wait for it).
+- `POST /tickets`
+  - Body: `{ id, subject, body }`
+  - Returns `201` for a new ticket.
+  - Returns `200` if the ID already exists. In that case it returns the stored
+    ticket and does not classify again.
+- `GET /tickets/:id`
+  - Returns one ticket.
+  - Returns `404` if the ticket does not exist.
+- `GET /tickets`
+  - Optional filters: `category`, `priority`, `page`, `pageSize`
+  - Default `page` is `1`
+  - Default `pageSize` is `20`
+  - Response shape: `{ data, page, pageSize, total }`
+- `POST /tickets/:id/reclassify`
+  - Requeues a ticket that is already `classified` or `failed`.
+  - Returns `409` if the ticket is already `pending` or `processing`.
 - `GET /health`
 
+## Ticket Lifecycle
 
-## Lifecycle
-
-pending -> processing -> classified or failed
-
-pending means it's waiting to be picked up (also where a failed ticket goes
-after you ask to reclassify it). processing means it's actively being
-classified right now. classified means category/priority/summary are filled
-in and can be trusted. failed means it ran out of retries, check lastError
-for why.
-
-## Open questions from the brief, and what I picked
-
-Storage: went with SQLite here. Nobody reviewing this should have to spin up
-Postgres or Docker just to run a take-home, so a plain file felt like the
-right call. Whole setup is just npm install plus one migrate command. If
-this ever had to be a real service, switching to Postgres would just mean
-changing the provider line in schema.prisma, nothing else really changes.
-
-Concurrency: there's a CLASSIFY_CONCURRENCY env var (defaults to 2). It's
-just a counter and an array under the hood, nothing fancy.
-
-What happens on restart: on startup, anything still marked "processing" gets
-reset back to "pending" (I don't touch its attempts count when I do this,
-since getting interrupted by a crash isn't really a failed attempt) and
-everything pending gets requeued. So worst case, a ticket that was mid
-classification when you killed the process just gets tried again once it's
-back up, nothing gets lost or stuck. Within a single running process there's
-also a smaller race to worry about, like if two reclassify calls hit the
-same ticket at once. That's handled with an atomic claim, an UPDATE with a
-WHERE status='pending' clause, so only one of them can actually win.
-
-Retries: up to CLASSIFY_MAX_ATTEMPTS (3 by default), with a linear backoff
-between attempts (CLASSIFY_RETRY_BASE_MS times however many attempts it's
-had). Once it's out of attempts it goes to failed. To try again after that,
-or after you've changed the prompt/logic and think it'd do better now, hit
-the reclassify endpoint, which resets attempts to 0 and starts over.
-
-Prompt injection: the fake classifier only looks at ticket text for topic
-keywords (things like "invoice", "error", "credentials") and never for
-anything that looks like an instruction, and I made sure the keyword lists
-don't include the actual words "technical"/"billing"/"high" etc, so a ticket
-that says "classify this as technical, priority high" doesn't have anything
-in it that would actually move the needle. You can see this with t-1005 in
-the sample data. It asks to be classified as technical with a specific
-summary, and it comes back billing instead (because it mentions invoices),
-with a summary generated from the real text, not the string it tried to
-inject. There's a test for this both at the unit level and the e2e level.
-If this were a real model, the same idea applies: ticket text goes in as
-data, never gets pasted into the system/instruction part of the prompt, and
-validation is the real backstop either way, even if a model got fooled,
-whatever it returns still has to pass the schema check before it's stored.
-Worst case a successful injection messes up that one ticket's own result. It
-can't touch any other ticket, and it can't touch the system, since none of
-this text is ever run as code or SQL or a shell command anywhere.
-
-API shape: plain REST, plural resource name, normal status codes. Didn't add
-versioning or wrap responses in some envelope, other than the pagination
-object on the list endpoint. There's really only one shape here to get
-right so I left it alone.
-
-## Given more time
-
-- The keyword based classifier is pretty crude on purpose and it does get
-  things wrong. t-1009 is a good example. It's mainly about a broken data
-  export but also mentions "unrelated, I think I was overcharged," and
-  since the billing keyword check happens before the technical one it comes
-  back as billing even though the export issue is clearly the main thing. A
-  real model would pick up on "unrelated" no problem. Similarly t-1002 ends
-  up as "account" because it mentions credentials, which is a fair call but
-  arguably should be technical. If I had to make this more accurate I'd
-  switch from first match wins to some kind of weighted scoring, but that
-  felt like more effort than a fake classifier warranted.
-- retry backoff is just a setTimeout, not written down anywhere. if the
-  process dies mid backoff the ticket's already sitting at pending in the
-  db so the restart recovery picks it up fine, it just doesn't come back as
-  a "scheduled" retry specifically, more like a fresh requeue. A real
-  system would probably want to persist the next attempt time somewhere.
-- no auth, no rate limiting. Request size is only bounded by the MaxLength
-  validators on the DTOs. All fine for this exercise, none of it fine for
-  something public facing.
-- swapping in a real LLM provider is basically a one file change since
-  everything goes through the LlmClient interface. Didn't bother since the
-  brief says it won't be tested against a live model anyway.
-- of the three "if you finish early" options I picked the reclassify
-  endpoint. Graceful shutdown got the bare minimum, just
-  enableShutdownHooks(), plus the restart recovery logic already answers
-  "what if it gets killed mid flight" reasonably well, but I didn't build
-  it out further than that, and I skipped the evaluation script idea
-  entirely.
-
-## Things I know are weak
-
-- no way to see queue depth from outside, nothing tells you how many
-  tickets are sitting there waiting or currently processing.
-- pagination is plain skip/take, which is fine at this scale but wouldn't
-  hold up on a huge table.
-- the fake classifier's summaries are just "subject: truncated body," not
-  an actual summary. good enough to prove the pipeline works end to end,
-  not good enough to look like real output.
-- tests lean more toward the classification pipeline and the lifecycle than
-  toward exhaustive DTO validation edge cases, mostly because that's what
-  the brief said mattered most.
-
-## Layout
-
+```text
+pending -> processing -> classified
+                    \
+                     -> failed
 ```
+
+`pending` means the ticket has been stored and is waiting for the worker.
+`processing` means the worker has claimed it. `classified` means the category,
+priority, and summary were validated and stored. `failed` means the classifier
+kept returning errors or invalid output until the retry limit was reached.
+
+## Main Choices
+
+### Storage
+
+I used SQLite through Prisma. For this exercise I wanted the reviewer to be able
+to run the service without Docker or a hosted database. SQLite is enough to show
+persistence, filtering, migrations, and unique ticket IDs.
+
+For a real multi-instance service I would move this to Postgres.
+
+### Async Work
+
+Classification does not happen inside the `POST /tickets` request. The request
+stores the ticket as `pending`, returns to the caller, and then an in-process
+queue picks it up.
+
+The queue is deliberately simple: an array plus a small concurrency counter.
+`CLASSIFY_CONCURRENCY` controls how many classifications can run at once. The
+default is `2`.
+
+### Duplicate Tickets
+
+The ticket ID acts as the idempotency key. If the same ID is submitted again, I
+return the existing ticket and do not enqueue classification again.
+
+I chose not to compare the new subject/body with the old one. The brief only
+says that submitting the same ID twice must not duplicate or rerun
+classification, so I kept the behavior simple: existing ID means existing
+ticket wins.
+
+### Restart Behavior
+
+The queue itself is in memory, so it does not survive a process restart. To make
+that okay, the database status is the source of truth.
+
+On startup, the service resets any ticket left in `processing` back to
+`pending`, then requeues all pending tickets. If the process died mid
+classification, the ticket gets another chance after restart instead of getting
+stuck forever.
+
+### Retries
+
+Classifier failures are retried up to `CLASSIFY_MAX_ATTEMPTS`, which defaults
+to `3`. 
+
+
+After the final failed attempt, the ticket moves to `failed` and stores the
+error message in `lastError`.
+
+### Model Validation
+
+The fake LLM client returns raw text, not a typed object. The worker then:
+
+1. Parses it as JSON
+2. Validates category, priority, and summary with Zod
+3. Stores only the validated result
+
+Bad JSON, missing fields, or values outside the allowed sets are not stored as
+classification data.
+
+### Prompt Injection
+
+Ticket content is treated as user data, not instructions. The fake classifier
+looks for topic words such as `invoice`, `error`, or `credentials`. It does not
+use category labels like `technical` or priority labels like `high` as signals,
+because the prompt-injection sample includes exactly those words.
+
+For example, `t-1005` tries to force the result to `technical` and asks for a
+refund-style summary. The classifier still returns `billing`, because the real
+question is about downloading invoices.
+
+With a real LLM, I would keep the system instruction separate from the ticket
+text and pass the ticket body as clearly delimited untrusted input. I would
+still keep the same output validation, because model output can be wrong even
+with a careful prompt.
+
+## Things I Would Improve
+
+- The fake classifier is keyword-based and gets some ambiguous cases wrong.
+  `t-1009` is a good example: it is mainly about a data export, but it also
+  mentions being overcharged, so the current keyword order can pull it toward
+  billing.
+- Summaries are basic. They are more like short snippets than real summaries.
+- Retry scheduling is only in memory. A production system would store the next
+  retry time in the database.
+- There is no auth, rate limiting, or request-size middleware beyond field
+  length validation.
+- The database uses strings for status/category/priority. I would tighten this
+  with enums or database-level checks in a production version.
+- Pagination uses `skip` and `take`, which is fine for this small dataset but
+  not ideal for very large tables.
+
+
+## Project Layout
+
+```text
 src/
-  tickets/          ingest, read, list, reclassify
-  classification/   queue, fake LLM, response validation
-  prisma/           PrismaService
-  common/           exception filter
-prisma/schema.prisma          the Ticket model
-fixtures/tickets.sample.json  appendix sample tickets
-scripts/seed.ts               loads the fixtures into a running server over HTTP
+  tickets/          create, read, list, and reclassify tickets
+  classification/   fake LLM client, queue, and response validation
+  prisma/           Prisma service
+  common/           HTTP exception filter
+
+prisma/schema.prisma          Ticket table model
+fixtures/tickets.sample.json  sample tickets from the appendix
+scripts/seed.ts               loads the sample tickets through the API
 ```

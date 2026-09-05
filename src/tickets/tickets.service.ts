@@ -25,9 +25,9 @@ export class TicketsService {
     private readonly queue: ClassificationQueueService,
   ) {}
 
-  // Idempotent on id — resubmitting the same id just returns what's already
-  // there, no re-classify. findUnique covers the normal case; the catch
-  // below covers two requests racing to create the same new id.
+  // idempotent on id, resubmitting the same id just returns what's already
+  // there, no re-classify. findUnique covers the normal case, the catch
+  // below covers two requests racing to create the same new id
   async create(
     dto: CreateTicketDto,
   ): Promise<{ ticket: Ticket; created: boolean }> {
@@ -93,9 +93,9 @@ export class TicketsService {
     return { data, page, pageSize, total };
   }
 
-  // Re-run classification for a ticket that failed, or that was classified
-  // under an old prompt/heuristic. Refuse if it's already in flight — it'll
-  // get to classified/failed on its own.
+  // re-run classification for a ticket that failed, or that was classified
+  // under an old prompt/heuristic. refuse if it's already in flight, it'll
+  // get to classified/failed on its own
   async reclassify(id: string): Promise<Ticket> {
     const ticket = await this.prisma.ticket.findUnique({ where: { id } });
     if (!ticket) {
