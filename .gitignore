@@ -1,0 +1,20 @@
+node_modules
+dist
+coverage
+
+# Keep environment variables out of version control
+.env
+
+/generated/prisma
+
+# SQLite database files
+prisma/*.db
+prisma/*.db-journal
+
+# Unused scaffolding created by `prisma init`, not part of this project
+.claude/
+.agents/
+.windsurf/
+
+# Local npm cache override (machine-specific workaround, not part of the project)
+.npmrc

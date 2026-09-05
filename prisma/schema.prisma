@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// status: pending -> processing -> classified | failed
+// "processing" that survives a restart means it got interrupted, see
+// ClassificationQueueService.onApplicationBootstrap
+model Ticket {
+  id        String   @id
+  subject   String
+  body      String
+  status    String   @default("pending")
+
+  category  String?
+  priority  String?
+  summary   String?
+
+  attempts  Int      @default(0)
+  lastError String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([category, priority])
+}
